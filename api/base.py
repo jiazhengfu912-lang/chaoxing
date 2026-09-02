@@ -544,7 +544,7 @@ class Chaoxing:
             job_list += _job_list
             job_info.update(_job_info)
 
-        if not job_list:
+        if not job_list and not point.get("has_finished", False):
             self.study_emptypage(course, point)
 
         logger.trace(f"原始任务点列表内容:\n{_resp.text}")

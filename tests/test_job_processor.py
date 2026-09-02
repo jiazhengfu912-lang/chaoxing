@@ -4,6 +4,7 @@ import os
 import sys
 import threading
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -17,8 +18,10 @@ class DummyChaoxing:
         """初始化测试替身，保存固定的任务点数据."""
         self.job_info = job_info
         self.rate_limiter = _NoopRateLimiter()
+        self.get_job_list_calls = 0
 
     def get_job_list(self, course, point):
+        self.get_job_list_calls += 1
         return self.job_info["jobs"], self.job_info["job_info"]
 
 
@@ -110,7 +113,7 @@ class JobProcessorTestCase(unittest.TestCase):
         self.assertIn(task, processor.failed_tasks)
 
     def test_success_does_not_retry(self):
-        # 已完成章节直接 SUCCESS，不应有任何重试。
+        # 目录页显示已完成的章节也要复核任务卡；无待完成任务时不应重试。
         course = {"title": "课程"}
         point = {"title": "章节", "has_finished": True}
         task = main.ChapterTask(index=0, point=point, course=course)
@@ -120,11 +123,26 @@ class JobProcessorTestCase(unittest.TestCase):
             "notopen_action": "retry",
             "retry_interval": 0.01,
         }
-        processor = main.JobProcessor(DummyChaoxing(self._not_open_job_info()), [task], config)
+        chaoxing = DummyChaoxing({"jobs": [], "job_info": {}})
+        processor = main.JobProcessor(chaoxing, [task], config)
         processor.max_tries = 3
         self._run_with_timeout(processor)
         self.assertEqual(task.tries, 0)
         self.assertTrue(processor.retry_queue.empty())
+        self.assertEqual(chaoxing.get_job_list_calls, 1)
+
+    def test_catalog_completed_chapter_processes_unfinished_video(self):
+        course = {"title": "课程"}
+        point = {"title": "PPT 和视频章节", "has_finished": True}
+        video_job = {"type": "video", "jobid": "video-1"}
+        chaoxing = DummyChaoxing({"jobs": [video_job], "job_info": {}})
+
+        with patch.object(main, "process_job", return_value=main.StudyResult.SUCCESS) as process_job:
+            result = main.process_chapter(chaoxing, course, point, 1.0)
+
+        self.assertEqual(result, main.ChapterResult.SUCCESS)
+        self.assertEqual(chaoxing.get_job_list_calls, 1)
+        process_job.assert_called_once_with(chaoxing, course, video_job, {}, 1.0)
 
 
 if __name__ == "__main__":

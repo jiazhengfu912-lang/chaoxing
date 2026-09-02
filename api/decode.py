@@ -230,12 +230,36 @@ def _process_attachment_cards(cards: List[Dict[str, Any]]) -> List[Dict[str, Any
     job_list = []
 
     for index, card in enumerate(cards):
+        card_type = card.get("type", "").lower()
+        property_data = card.get("property", {})
+        prop_type = property_data.get("type", "").lower()
+        resource_type = property_data.get("resourceType", "").lower()
+
+        # 直播任务可能使用 video 类型，因此先用多个特征排除直播，避免误报为普通视频。
+        is_live = (
+                "live" in card_type
+                or "live" in prop_type
+                or "live" in resource_type
+                or "livestream" in card_type
+                or property_data.get("liveId") is not None
+                or property_data.get("streamName") is not None
+                or property_data.get("vdoid") is not None
+        )
+
+        if card_type == "video" and not is_live:
+            video_name = property_data.get("name") or property_data.get("title") or "未命名视频"
+            if card.get("isPassed", False):
+                logger.info(f"视频已观看：{video_name}")
+            else:
+                logger.info(f"视频未观看，将开始观看：{video_name}")
+
         # 跳过已通过的任务
         if card.get("isPassed", False):
             continue
 
-        # 处理无job字段的特殊任务
-        if card.get("job") is None:
+        # 部分未完成视频没有job字段，仍需进入下面的视频任务处理。
+        # 其他无job字段的特殊卡片继续按原逻辑尝试识别为阅读任务。
+        if card.get("job") is None and card_type != "video":
             # 尝试识别阅读任务
             read_job = _process_read_task(card)
             if read_job:
@@ -248,24 +272,6 @@ def _process_attachment_cards(cards: List[Dict[str, Any]]) -> List[Dict[str, Any
             logger.trace("Fixing other info...")
             card["otherInfo"] = card["otherInfo"].split("&")[0]
             logger.trace(f"New info: {card['otherInfo']}")
-
-        # 多维度判断是否为直播任务
-        card_type = card.get("type", "").lower()
-        property_data = card.get("property", {})
-        prop_type = property_data.get("type", "").lower()
-        resource_type = property_data.get("resourceType", "").lower()
-
-        # 直播任务特征：包含liveId、streamName等字段，
-        # 或类型标识包含live（因为live和video有点类似，怕超星又搞出什么幺蛾子就加了一些关键字识别）
-        is_live = (
-                "live" in card_type
-                or "live" in prop_type
-                or "live" in resource_type
-                or "livestream" in card_type
-                or property_data.get("liveId") is not None
-                or property_data.get("streamName") is not None
-                or property_data.get("vdoid") is not None
-        )
 
         # 根据任务类型处理
         if is_live:

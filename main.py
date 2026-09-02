@@ -53,6 +53,84 @@ def str_to_bool(value):
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def validate_jobs(value: Any) -> int:
+    """验证章节并发数，确保任务处理器至少启动一个工作线程。"""
+    if isinstance(value, bool):
+        raise InputFormatError("章节并发数必须是大于等于 1 的整数")
+    try:
+        jobs = int(value)
+    except (TypeError, ValueError) as e:
+        raise InputFormatError("章节并发数必须是大于等于 1 的整数") from e
+    if jobs < 1:
+        raise InputFormatError("章节并发数必须是大于等于 1 的整数")
+    return jobs
+
+
+def should_prompt_runtime_options() -> bool:
+    """仅无参数启动时，在登录后显示任务与播放速度选择。"""
+    return len(sys.argv) == 1
+
+
+def prompt_runtime_options(common_config: dict[str, Any]) -> None:
+    """在交互启动时选择章节并发数和播放速度。"""
+    while True:
+        choice = input(
+            "\n请选择任务执行方式：\n"
+            "1. 单任务（一次只处理一个章节）\n"
+            "2. 多任务（同时处理多个章节）\n"
+            "请输入 1 或 2: "
+        ).strip()
+        if choice == "1":
+            common_config["jobs"] = 1
+            break
+        if choice == "2":
+            while True:
+                raw_jobs = input("请输入同时进行的章节数（>=2，直接回车使用 4）: ").strip()
+                if not raw_jobs:
+                    common_config["jobs"] = 4
+                    break
+                try:
+                    jobs = int(raw_jobs)
+                except ValueError:
+                    print("输入无效，请输入不小于 2 的整数。")
+                    continue
+                if jobs < 2:
+                    print("多任务模式的章节数不能小于 2。")
+                    continue
+                common_config["jobs"] = jobs
+                break
+            break
+        print("输入无效，请输入 1 或 2。")
+
+    while True:
+        choice = input("是否启用倍速播放？(y/n): ").strip().lower()
+        if choice in {"y", "yes", "是"}:
+            while True:
+                raw_speed = input("请输入播放倍速（1.0-2.0）: ").strip()
+                try:
+                    speed = float(raw_speed)
+                except ValueError:
+                    print("输入无效，请输入 1.0 到 2.0 之间的数字。")
+                    continue
+                if not 1.0 <= speed <= 2.0:
+                    print("播放倍速必须在 1.0 到 2.0 之间。")
+                    continue
+                common_config["speed"] = speed
+                break
+            break
+        if choice in {"n", "no", "否"}:
+            common_config["speed"] = 1.0
+            break
+        print("输入无效，请输入 y 或 n。")
+
+    logger.info(
+        "已选择 {}模式，并发章节数: {}，播放速度: {}x",
+        "单任务" if common_config["jobs"] == 1 else "多任务",
+        common_config["jobs"],
+        common_config["speed"],
+    )
+
+
 def parse_args():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
@@ -71,10 +149,10 @@ def parse_args():
         "-l", "--list", type=str, default=None, help="要学习的课程ID列表, 以 , 分隔"
     )
     parser.add_argument(
-        "-s", "--speed", type=float, default=1.0, help="视频播放倍速 (默认1, 最大2)"
+        "-s", "--speed", type=float, default=1.0, help="播放倍速（1 为原速，最大 2）"
     )
     parser.add_argument(
-        "-j", "--jobs", type=int, default=4, help="同时进行的章节数 (默认4, 如果一个章节有多个任务点，不会限制同时处理任务点的数量)"
+        "-j", "--jobs", type=int, default=4, help="同时进行的章节数（1 为单任务，默认 4）"
     )
 
     parser.add_argument(
@@ -325,8 +403,7 @@ class ChapterTask:
 class JobProcessor:
     def __init__(self, chaoxing: Chaoxing, tasks: list[ChapterTask], config: dict[str, Any]):
         """初始化任务处理器."""
-        if "jobs" not in config or not config["jobs"]:
-            config["jobs"] = 4
+        config["jobs"] = validate_jobs(config.get("jobs", 4))
 
         self.chaoxing = chaoxing
         self.speed = config["speed"]
@@ -426,9 +503,8 @@ class JobProcessor:
 def process_chapter(chaoxing: Chaoxing, course: dict[str, Any], point: dict[str, Any], speed: float) -> ChapterResult:
     """处理单个章节"""
     logger.info(f'当前章节: {point["title"]}')
-    if point["has_finished"]:
-        logger.info(f'章节：{point["title"]} 已完成所有任务点')
-        return ChapterResult.SUCCESS
+    if point.get("has_finished", False):
+        logger.info(f'章节：{point["title"]} 目录页显示已完成，正在复核任务卡')
 
     # 随机等待，避免请求过快
     chaoxing.rate_limiter.limit_rate(random_time=True, random_min=0, random_max=0.2)
@@ -529,11 +605,13 @@ def format_time(num, suffix='', divisor=''):
 def main():
     """主程序入口"""
     try:
+        interactive_runtime_options = should_prompt_runtime_options()
         # 初始化配置
         common_config, tiku_config, notification_config, config_path = init_config()
 
         # 强制播放按照配置文件调节
         common_config["speed"] = min(2.0, max(1.0, common_config.get("speed", 1.0)))
+        common_config["jobs"] = validate_jobs(common_config.get("jobs", 4))
         common_config["notopen_action"] = common_config.get("notopen_action", "retry")
         
         # 初始化增加章节学习次数配置
@@ -553,6 +631,9 @@ def main():
         _login_state = chaoxing.login(login_with_cookies=common_config.get("use_cookies", False))
         if not _login_state["status"]:
             raise LoginError(_login_state["msg"])
+
+        if interactive_runtime_options:
+            prompt_runtime_options(common_config)
 
         # 获取所有的课程列表
         all_course = chaoxing.get_course_list()
