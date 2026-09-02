@@ -650,6 +650,17 @@ class Chaoxing:
                     logger.error(f"验证码通关逻辑异常: {e}")
             return res
 
+        def parse_progress_result(response):
+            data = response.json()
+            locally_finished = (
+                    data.get("hasJobLimit") is False
+                    and _isdrag != 4
+                    and _playingTime >= _duration
+            )
+            if locally_finished and not data.get("isPassed", False):
+                logger.info("非任务视频已观看完成: {}", _job.get("name", "未命名视频"))
+            return bool(data.get("isPassed", False) or locally_finished), 200
+
         rt = _job['rt']
         if not rt:
             rt_search = re.search(r"-rt_([1d])", _job['otherinfo'])
@@ -668,7 +679,7 @@ class Chaoxing:
                 resp = perform_request(rt)
                 if resp.status_code == 200:
                     logger.trace(resp.text)
-                    return resp.json()["isPassed"], 200
+                    return parse_progress_result(resp)
                 elif resp.status_code == 403:
                     logger.warning("出现403报错, 正常尝试切换rt")
                 else:
@@ -680,7 +691,7 @@ class Chaoxing:
 
         if resp.status_code == 200:
             logger.trace(resp.text)
-            return resp.json()["isPassed"], 200
+            return parse_progress_result(resp)
 
         elif resp.status_code == 403:
             logger.debug(
@@ -781,6 +792,8 @@ class Chaoxing:
 
         forbidden_retry = 0
         max_forbidden_retry = 2
+        completion_retry = 0
+        max_completion_retry = 3
 
         passed, state = self.video_progress_log(_session, _course, _job, _job_info, _dtoken, duration, duration,
                                                 _type, headers=headers, _isdrag=4)
@@ -825,6 +838,16 @@ class Chaoxing:
 
                     elif not passed and state != 200:
                         return StudyResult.ERROR
+
+                    if play_time >= duration and not passed:
+                        completion_retry += 1
+                        if completion_retry >= max_completion_retry:
+                            logger.warning(
+                                "视频已播放到结尾，但平台连续 {} 次未确认完成，停止重复上报: {}",
+                                max_completion_retry,
+                                _job["name"],
+                            )
+                            return StudyResult.TIMEOUT
 
                     wait_time = int(random.uniform(30, 90))
                     last_log_time = play_time

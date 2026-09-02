@@ -144,6 +144,24 @@ class JobProcessorTestCase(unittest.TestCase):
         self.assertEqual(chaoxing.get_job_list_calls, 1)
         process_job.assert_called_once_with(chaoxing, course, video_job, {}, 1.0)
 
+    def test_chapter_processes_multiple_videos_in_order(self):
+        course = {"title": "课程"}
+        point = {"title": "包含两个视频的章节", "has_finished": True}
+        video_jobs = [
+            {"type": "video", "jobid": "video-1"},
+            {"type": "video", "jobid": "video-2"},
+        ]
+        chaoxing = DummyChaoxing({"jobs": video_jobs, "job_info": {}})
+
+        with patch.object(main, "process_job", return_value=main.StudyResult.SUCCESS) as process_job:
+            result = main.process_chapter(chaoxing, course, point, 1.0)
+
+        self.assertEqual(result, main.ChapterResult.SUCCESS)
+        self.assertEqual(
+            [call.args[2]["jobid"] for call in process_job.call_args_list],
+            ["video-1", "video-2"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
