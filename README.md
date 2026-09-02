@@ -1,24 +1,37 @@
-# :computer: 超星学习通自动化完成任务点(命令行版)
+# :computer: 超星学习通自动化任务工具（改进版）
 
 <p align="center">
-    <a href="https://github.com/Samueli924/chaoxing" target="_blank" style="margin-right: 20px; font-style: normal; text-decoration: none;">
-        <img src="https://img.shields.io/github/stars/Samueli924/chaoxing" alt="Github Stars" />
+    <a href="https://github.com/jiazhengfu912-lang/chaoxing" target="_blank" style="margin-right: 20px; font-style: normal; text-decoration: none;">
+        <img src="https://img.shields.io/github/stars/jiazhengfu912-lang/chaoxing" alt="Github Stars" />
     </a>
-    <a href="https://github.com/Samueli924/chaoxing" target="_blank" style="margin-right: 20px; font-style: normal; text-decoration: none;">
-        <img src="https://img.shields.io/github/forks/Samueli924/chaoxing" alt="Github Forks" />
+    <a href="https://github.com/jiazhengfu912-lang/chaoxing" target="_blank" style="margin-right: 20px; font-style: normal; text-decoration: none;">
+        <img src="https://img.shields.io/github/forks/jiazhengfu912-lang/chaoxing" alt="Github Forks" />
     </a>
-    <a href="https://github.com/Samueli924/chaoxing" target="_blank" style="margin-right: 20px; font-style: normal; text-decoration: none;">
-        <img src="https://img.shields.io/github/languages/code-size/Samueli924/chaoxing" alt="Code-size" />
+    <a href="https://github.com/jiazhengfu912-lang/chaoxing" target="_blank" style="margin-right: 20px; font-style: normal; text-decoration: none;">
+        <img src="https://img.shields.io/github/languages/code-size/jiazhengfu912-lang/chaoxing" alt="Code-size" />
     </a>
-    <a href="https://github.com/Samueli924/chaoxing" target="_blank" style="margin-right: 20px; font-style: normal; text-decoration: none;">
-        <img src="https://img.shields.io/github/v/release/Samueli924/chaoxing?display_name=tag&sort=semver" alt="version" />
+    <a href="LICENSE" target="_blank" style="margin-right: 20px; font-style: normal; text-decoration: none;">
+        <img src="https://img.shields.io/github/license/jiazhengfu912-lang/chaoxing" alt="License" />
     </a>
 </p>
-:muscle: 本项目的最终目的是通过开源消灭所谓的付费刷课平台，希望有能力的朋友都可以为这个项目提交代码，支持本项目的良性发展
 
-:star: 觉得有帮助的朋友可以给个Star
+> [!IMPORTANT]
+> 本仓库基于 Samueli924 的 [chaoxing](https://github.com/Samueli924/chaoxing) 项目进行改进，基础版本为上游 `main` 分支提交 [`20d7070`](https://github.com/Samueli924/chaoxing/commit/20d7070c927dec40c50f809083b26d76052e7f50)。本仓库是独立维护的改进版，不代表上游项目的官方版本。
 
-## :point_up: 更新通知
+## :books: 项目作用
+
+这是一个使用 Python 编写的超星学习通命令行自动化工具。程序登录后读取课程和章节任务卡，并通过现有处理流程完成视频、音频、直播、文档、阅读和作业等任务点；同时保留题库、通知、未开放章节处理和章节学习次数等上游功能。
+
+## :sparkles: 本改进版新增内容
+
+1. **单任务或多任务自由选择**：无参数启动并登录成功后，可选择一次只处理一个章节，或按指定并发数同时处理多个章节。
+2. **原速或倍速自由选择**：可使用原速，也可设置 `1.0–2.0` 倍速；选择的速度会传递给视频、音频和直播处理。
+3. **完成章节再次复核任务卡**：不再仅依据目录页的“已完成”状态跳过章节，避免 PPT 已完成但同章节视频尚未观看时发生漏刷。
+4. **显示视频观看状态**：复核时明确输出“视频已观看”或“视频未观看，将开始观看”。
+5. **修复无 `job` 字段视频被跳过**：未完成视频即使没有 `job` 字段，也会继续进入视频任务处理流程。
+6. **增加无网络回归测试**：覆盖运行模式、并发数量、速度传递、混合 PPT/视频章节和无 `job` 字段视频等场景。
+
+## :point_up: 上游更新记录
 20241021更新通知： 感谢[sz134055](https://github.com/sz134055)提交代码[PR #360](https://github.com/Samueli924/chaoxing/pull/360)，**添加了对题库答题的支持**  
 
 ## :books: 使用方法
@@ -28,7 +41,7 @@
 1. clone 项目至本地
 
 ```bash
-git clone --depth=1 https://github.com/Samueli924/chaoxing 
+git clone --depth=1 https://github.com/jiazhengfu912-lang/chaoxing.git
 cd chaoxing
 ```
 
@@ -45,6 +58,16 @@ pip install -r requirements.txt
 python main.py
 ```
 
+#### 无参数启动的交互选择
+
+无参数运行时，登录成功后会依次询问任务执行方式和播放速度：
+
+- 单任务：一次只处理一个章节。
+- 多任务：输入同时处理的章节数，直接回车默认使用 4 个章节。
+- 倍速播放：选择启用后输入 1.0 到 2.0 之间的播放速度；不启用时使用原速 1.0。
+
+使用配置文件或命令行参数时不会弹出这些选择，可用于无人值守运行：`jobs = 1` 为单任务，`jobs >= 2` 为多任务；`speed = 1` 为原速，`speed > 1` 为倍速。
+
 4. (可选配置文件运行)
 
 > 复制config_template.ini文件为config.ini文件，修改文件内的账号密码内容
@@ -56,8 +79,10 @@ python main.py -c config.ini
 5. (可选命令行运行)
 
 ```bash
-python main.py -u 手机号 -p 密码 -l 课程ID1,课程ID2,课程ID3...(可选) -a [retry|ask|continue](可选)
+python main.py -u 手机号 -p 密码 -l 课程ID1,课程ID2,课程ID3...(可选) -j 1 -s 1.5 -a [retry|ask|continue](可选)
 ```
+
+其中 `-j 1` 表示单任务，`-j 2` 及以上表示多任务；`-s 1` 为原速，`-s <1.0-2.0>` 可设置播放倍速。
 
 > Tips:  
 > 如果已安装低版本 Python 推荐使用 `uv` 运行：
@@ -72,7 +97,9 @@ uv run --python 3.13 main.py -c config.ini
 ```
 
 ### 打包文件运行
-1. 从最新[Releases](https://github.com/Samueli924/chaoxing/releases)中下载exe文件
+本改进版暂不发布可执行文件。如需使用上游原版打包文件，可从[上游项目 Releases](https://github.com/Samueli924/chaoxing/releases)下载；上游打包文件不包含本仓库新增改进。
+
+1. 从上游项目 Releases 下载 exe 文件
 2. (可选直接运行) 双击运行即可
 3. (可选配置文件运行) 下载config_template.ini文件保存为config.ini文件，修改文件内的账号密码内容, 执行 `./chaoxing.exe -c config.ini`
 4. (可选命令行运行)`./chaoxing.exe -u "手机号" -p "密码" -l 课程ID1,课程ID2,课程ID3...(可选) -a [retry|ask|continue](可选)`
@@ -144,7 +171,19 @@ python main.py -a ask  # 使用询问模式
 
 与题库配置类似，不填写视为不使用，按照注释填写想要使用的外部通知服务（也是`provider`，大小写要一致），并填写必要的`url`
 
-## :heart: CONTRIBUTORS
+## :test_tube: 测试
+
+测试不需要连接超星平台：
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+当前测试覆盖单/多任务调度、播放速度传递、交互输入校验，以及混合 PPT/视频章节的复核与漏刷回归场景。真实平台登录和学习效果仍需使用者以自己的账号在本机验收。
+
+## :heart: 上游项目与贡献者
+
+本项目保留上游完整 Git 历史。以下统计和贡献者列表来自原项目 [Samueli924/chaoxing](https://github.com/Samueli924/chaoxing)，感谢原作者及所有上游贡献者。
 
 ![Alt](https://repobeats.axiom.co/api/embed/d3931e84b4b2f17cbe60cafedb38114bdf9931cb.svg "Repobeats analytics image")  
 
@@ -153,6 +192,6 @@ python main.py -a ask  # 使用询问模式
 </a>
 
 ## :warning: 免责声明
-- 本代码遵循 [GPL-3.0 License](https://github.com/Samueli924/chaoxing/blob/main/LICENSE) 协议，允许**开源/免费使用和引用/修改/衍生代码的开源/免费使用**，不允许**修改和衍生的代码作为闭源的商业软件发布和销售**，禁止**使用本代码盈利**，以此代码为基础的程序**必须**同样遵守 [GPL-3.0 License](https://github.com/Samueli924/chaoxing/blob/main/LICENSE) 协议
-- 本代码仅用于**学习讨论**，禁止**用于盈利**
+- 本仓库基于采用 GPL-3.0 的上游源码，并继续按 [GPL-3.0 License](LICENSE) 发布。分发本项目或衍生版本时，请遵守许可证并保留相应的许可证与源码义务。
+- 本代码仅用于学习、研究和技术交流。使用者应遵守所在地区法律法规、平台服务条款和学校相关规定。
 - 他人或组织使用本代码进行的任何**违法行为**与本人无关
