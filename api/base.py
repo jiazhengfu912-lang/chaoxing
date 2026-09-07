@@ -795,11 +795,23 @@ class Chaoxing:
         completion_retry = 0
         max_completion_retry = 3
 
-        passed, state = self.video_progress_log(_session, _course, _job, _job_info, _dtoken, duration, duration,
-                                                _type, headers=headers, _isdrag=4)
-        if passed:
-            logger.info("任务瞬间完成: {}", _job['name'])
-            return StudyResult.SUCCESS
+        passed = False
+        if play_time >= duration:
+            passed, state = self.video_progress_log(
+                _session,
+                _course,
+                _job,
+                _job_info,
+                _dtoken,
+                duration,
+                duration,
+                _type,
+                headers=headers,
+                _isdrag=4,
+            )
+            if passed:
+                logger.info("平台确认任务已完成: {}", _job['name'])
+                return StudyResult.SUCCESS
 
         pbar = None
         try:

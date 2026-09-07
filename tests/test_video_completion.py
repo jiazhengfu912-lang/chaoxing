@@ -4,7 +4,7 @@ import json
 import os
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -50,6 +50,21 @@ class _Session:
                 "isPassed": False,
                 "videoTimeLimit": False,
                 "hasJobLimit": self.has_job_limit,
+            }
+        )
+
+
+class _AlwaysPassedSession(_Session):
+    def get(self, url, params=None, headers=None):
+        if "/ananas/status/" in url:
+            return super().get(url, params=params, headers=headers)
+
+        self.progress_params.append(dict(params or {}))
+        return _Response(
+            {
+                "isPassed": True,
+                "videoTimeLimit": False,
+                "hasJobLimit": False,
             }
         )
 
@@ -105,6 +120,32 @@ class VideoCompletionTestCase(unittest.TestCase):
 
         self.assertFalse(passed)
         self.assertEqual(state, 200)
+
+    def test_zero_progress_video_must_play_before_accepting_passed_state(self):
+        session = _AlwaysPassedSession()
+        zero_progress_job = dict(self.job, playTime=0)
+        clock = Mock()
+        clock.time.side_effect = (float(tick) for tick in range(0, 1000, 10))
+        with patch.object(SessionManager, "get_session", return_value=session), patch.object(
+            self.chaoxing.video_log_limiter, "limit_rate"
+        ), patch.object(self.chaoxing, "get_uid", return_value="user-1"), patch(
+            "api.base.time", clock
+        ), patch(
+            "api.base.tqdm", return_value=_ProgressBar()
+        ):
+            result = self.chaoxing.study_video(
+                self.course,
+                zero_progress_job,
+                {},
+                _speed=1.0,
+                _type="Video",
+            )
+
+        self.assertEqual(result, StudyResult.SUCCESS)
+        self.assertEqual(
+            [params["isdrag"] for params in session.progress_params],
+            [3],
+        )
 
     def test_non_task_video_returns_after_real_playback_reaches_end(self):
         session = _Session()
