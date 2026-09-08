@@ -508,7 +508,12 @@ class Chaoxing:
         logger.info("课程章节读取成功...")
         return decode_course_point(_resp.text)
 
-    def get_job_list(self, course: dict, point: dict) -> tuple[list[dict], dict]:
+    def get_job_list(
+            self,
+            course: dict,
+            point: dict,
+            include_completed_videos: bool = False,
+    ) -> tuple[list[dict], dict]:
         _session = SessionManager.get_session()
         self.rate_limiter.limit_rate()
         job_list = []
@@ -535,7 +540,10 @@ class Chaoxing:
                 logger.error(_resp.text)
                 return [], {}
 
-            _job_list, _job_info = decode_course_card(_resp.text)
+            _job_list, _job_info = decode_course_card(
+                _resp.text,
+                include_completed_videos=include_completed_videos,
+            )
             if _job_info.get("notOpen", False):
                 # 直接返回, 节省一次请求
                 logger.info("该章节未开放")
@@ -763,7 +771,8 @@ class Chaoxing:
         return None
 
     def study_video(self, _course, _job, _job_info, _speed: float = 1.0,
-                    _type: Literal["Video", "Audio"] = "Video") -> StudyResult:
+                    _type: Literal["Video", "Audio"] = "Video",
+                    _force_full_playback: bool = False) -> StudyResult:
         _session = SessionManager.get_session()
 
         headers = gc.VIDEO_HEADERS if _type == "Video" else gc.AUDIO_HEADERS
@@ -783,7 +792,7 @@ class Chaoxing:
         # Time in the video (can be scaled with the speed factor): duration, play_time, last_log_time, wait_time
 
         duration = int(_video_info["duration"])
-        play_time = int(_job["playTime"]) // 1000
+        play_time = 0 if _force_full_playback else int(_job["playTime"]) // 1000
         last_log_time = 0
         last_iter = time.time()
         wait_time = int(random.uniform(30, 90))
@@ -796,7 +805,7 @@ class Chaoxing:
         max_completion_retry = 3
 
         passed = False
-        if play_time >= duration:
+        if not _force_full_playback and play_time >= duration:
             passed, state = self.video_progress_log(
                 _session,
                 _course,
@@ -822,6 +831,13 @@ class Chaoxing:
                     passed, state = self.video_progress_log(_session, _course, _job, _job_info, _dtoken, duration,
                                                             int(play_time), _type, headers=headers)
 
+                    if _force_full_playback and passed and play_time < duration:
+                        logger.debug(
+                            "全部重看模式：忽略平台提前返回的完成状态，继续观看：{}",
+                            _job["name"],
+                        )
+                        passed = False
+
                     if state == 403:
                         if forbidden_retry >= max_forbidden_retry:
                             logger.warning("403重试失败, 跳过当前任务")
@@ -838,7 +854,7 @@ class Chaoxing:
                             _dtoken = refreshed_meta["dtoken"]
                             duration = int(refreshed_meta["duration"])
                             refreshed_play_time = refreshed_meta.get("playTime")
-                            if refreshed_play_time is not None:
+                            if refreshed_play_time is not None and not _force_full_playback:
                                 play_time = int(refreshed_play_time)
 
                             logger.debug("刷新后的令牌: {}, 持续时间: {}, 播放时间: {}", _dtoken, duration, play_time)

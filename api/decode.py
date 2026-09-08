@@ -154,7 +154,10 @@ def _extract_points_from_chapter(chapter_unit) -> List[Dict[str, Any]]:
     return point_list
 
 
-def decode_course_card(html_text: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+def decode_course_card(
+        html_text: str,
+        include_completed_videos: bool = False,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     解析任务点列表页面，提取任务点信息
     
@@ -186,7 +189,7 @@ def decode_course_card(html_text: str) -> Tuple[List[Dict[str, Any]], Dict[str, 
 
     # 处理所有附件任务
     cards = cards_data.get("attachments", [])
-    job_list = _process_attachment_cards(cards)
+    job_list = _process_attachment_cards(cards, include_completed_videos)
 
     return job_list, job_info
 
@@ -217,7 +220,10 @@ def _extract_job_info(cards_data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _process_attachment_cards(cards: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _process_attachment_cards(
+        cards: List[Dict[str, Any]],
+        include_completed_videos: bool = False,
+) -> List[Dict[str, Any]]:
     """
     处理所有附件任务卡片，强化直播任务识别逻辑
     
@@ -249,12 +255,23 @@ def _process_attachment_cards(cards: List[Dict[str, Any]]) -> List[Dict[str, Any
         if card_type == "video" and not is_live:
             video_name = property_data.get("name") or property_data.get("title") or "未命名视频"
             if card.get("isPassed", False):
-                logger.info(f"视频已观看：{video_name}")
+                if include_completed_videos:
+                    logger.info(f"视频已观看，将从头重新观看：{video_name}")
+                else:
+                    logger.info(f"视频已观看：{video_name}")
             else:
-                logger.info(f"视频未观看，将开始观看：{video_name}")
+                if include_completed_videos:
+                    logger.info(f"视频将从头观看：{video_name}")
+                else:
+                    logger.info(f"视频未观看，将开始观看：{video_name}")
 
         # 跳过已通过的任务
-        if card.get("isPassed", False):
+        replay_completed_video = (
+                include_completed_videos
+                and card_type == "video"
+                and not is_live
+        )
+        if card.get("isPassed", False) and not replay_completed_video:
             continue
 
         # 部分未完成视频没有job字段，仍需进入下面的视频任务处理。

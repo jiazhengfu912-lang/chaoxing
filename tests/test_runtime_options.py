@@ -18,23 +18,25 @@ class RuntimeOptionsTestCase(unittest.TestCase):
 
     def test_single_task_with_original_speed(self):
         config = {"jobs": 4, "speed": 2.0}
-        with patch("builtins.input", side_effect=["1", "n"]):
+        with patch("builtins.input", side_effect=["1", "n", "1"]):
             main.prompt_runtime_options(config)
 
         self.assertEqual(config["jobs"], 1)
         self.assertEqual(config["speed"], 1.0)
+        self.assertEqual(config["video_mode"], "normal")
 
     def test_multi_task_with_custom_speed(self):
         config = {"jobs": 1, "speed": 1.0}
-        with patch("builtins.input", side_effect=["2", "6", "y", "1.5"]):
+        with patch("builtins.input", side_effect=["2", "6", "y", "1.5", "2"]):
             main.prompt_runtime_options(config)
 
         self.assertEqual(config["jobs"], 6)
         self.assertEqual(config["speed"], 1.5)
+        self.assertEqual(config["video_mode"], "replay_all")
 
     def test_multi_task_uses_default_job_count_on_blank_input(self):
         config = {"jobs": 1, "speed": 1.0}
-        with patch("builtins.input", side_effect=["2", "", "n"]):
+        with patch("builtins.input", side_effect=["2", "", "n", "1"]):
             main.prompt_runtime_options(config)
 
         self.assertEqual(config["jobs"], 4)
@@ -42,12 +44,13 @@ class RuntimeOptionsTestCase(unittest.TestCase):
 
     def test_invalid_runtime_options_are_prompted_again(self):
         config = {"jobs": 1, "speed": 1.0}
-        inputs = ["invalid", "2", "1", "abc", "3", "maybe", "y", "2.5", "1.75"]
+        inputs = ["invalid", "2", "1", "abc", "3", "maybe", "y", "2.5", "1.75", "x", "2"]
         with patch("builtins.input", side_effect=inputs), patch("builtins.print"):
             main.prompt_runtime_options(config)
 
         self.assertEqual(config["jobs"], 3)
         self.assertEqual(config["speed"], 1.75)
+        self.assertEqual(config["video_mode"], "replay_all")
 
     def test_only_argument_free_launch_prompts_runtime_options(self):
         with patch.object(main.sys, "argv", ["main.py"]):
@@ -64,6 +67,18 @@ class RuntimeOptionsTestCase(unittest.TestCase):
             with self.subTest(value=value):
                 with self.assertRaises(main.InputFormatError):
                     main.validate_jobs(value)
+
+    def test_validate_video_mode(self):
+        self.assertEqual(main.validate_video_mode(None), "normal")
+        self.assertEqual(main.validate_video_mode(" REPLAY_ALL "), "replay_all")
+        with self.assertRaises(main.InputFormatError):
+            main.validate_video_mode("invalid")
+
+    def test_command_line_accepts_replay_all_mode(self):
+        with patch.object(main.sys, "argv", ["main.py", "--video-mode", "replay_all"]):
+            args = main.parse_args()
+
+        self.assertEqual(args.video_mode, "replay_all")
 
 
 class MainRuntimeOptionsIntegrationTestCase(unittest.TestCase):
@@ -150,8 +165,8 @@ class SpeedPropagationTestCase(unittest.TestCase):
             def __init__(self):
                 self.calls = []
 
-            def study_video(self, course, job, job_info, _speed, _type):
-                self.calls.append((_speed, _type))
+            def study_video(self, course, job, job_info, _speed, _type, _force_full_playback=False):
+                self.calls.append((_speed, _type, _force_full_playback, job.get("playTime")))
                 return main.StudyResult.ERROR if _type == "Video" else main.StudyResult.SUCCESS
 
         chaoxing = DummyChaoxing()
@@ -161,7 +176,42 @@ class SpeedPropagationTestCase(unittest.TestCase):
         result = main.process_job(chaoxing, course, job, {}, 1.75)
 
         self.assertEqual(result, main.StudyResult.SUCCESS)
-        self.assertEqual(chaoxing.calls, [(1.75, "Video"), (1.75, "Audio")])
+        self.assertEqual(
+            chaoxing.calls,
+            [(1.75, "Video", False, None), (1.75, "Audio", False, None)],
+        )
+
+    def test_replay_all_video_starts_at_zero_and_forces_full_playback(self):
+        class DummyChaoxing:
+            def __init__(self):
+                self.calls = []
+
+            def study_video(self, course, job, job_info, _speed, _type, _force_full_playback=False):
+                self.calls.append((job, _type, _force_full_playback))
+                return main.StudyResult.SUCCESS
+
+        chaoxing = DummyChaoxing()
+        original_job = {
+            "type": "video",
+            "jobid": "job-1",
+            "playTime": 90_000,
+        }
+
+        result = main.process_job(
+            chaoxing,
+            {"title": "课程"},
+            original_job,
+            {},
+            1.0,
+            replay_all_videos=True,
+        )
+
+        self.assertEqual(result, main.StudyResult.SUCCESS)
+        replay_job, media_type, force_full_playback = chaoxing.calls[0]
+        self.assertEqual(replay_job["playTime"], 0)
+        self.assertEqual(media_type, "Video")
+        self.assertTrue(force_full_playback)
+        self.assertEqual(original_job["playTime"], 90_000)
 
     def test_live_receives_selected_speed(self):
         class DummyChaoxing:

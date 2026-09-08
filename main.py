@@ -66,13 +66,21 @@ def validate_jobs(value: Any) -> int:
     return jobs
 
 
+def validate_video_mode(value: Any) -> str:
+    """验证视频处理模式。"""
+    mode = str(value or "normal").strip().lower()
+    if mode not in {"normal", "replay_all"}:
+        raise InputFormatError("视频处理模式必须是 normal 或 replay_all")
+    return mode
+
+
 def should_prompt_runtime_options() -> bool:
     """仅无参数启动时，在登录后显示任务与播放速度选择。"""
     return len(sys.argv) == 1
 
 
 def prompt_runtime_options(common_config: dict[str, Any]) -> None:
-    """在交互启动时选择章节并发数和播放速度。"""
+    """在交互启动时选择章节并发数、播放速度和视频处理方式。"""
     while True:
         choice = input(
             "\n请选择任务执行方式：\n"
@@ -123,11 +131,27 @@ def prompt_runtime_options(common_config: dict[str, Any]) -> None:
             break
         print("输入无效，请输入 y 或 n。")
 
+    while True:
+        choice = input(
+            "请选择视频处理方式：\n"
+            "1. 正常模式（只处理未完成视频，并从历史进度续播）\n"
+            "2. 全部重看（所有视频从 0 秒开始完整观看）\n"
+            "请输入 1 或 2: "
+        ).strip()
+        if choice == "1":
+            common_config["video_mode"] = "normal"
+            break
+        if choice == "2":
+            common_config["video_mode"] = "replay_all"
+            break
+        print("输入无效，请输入 1 或 2。")
+
     logger.info(
-        "已选择 {}模式，并发章节数: {}，播放速度: {}x",
+        "已选择 {}模式，并发章节数: {}，播放速度: {}x，视频处理: {}",
         "单任务" if common_config["jobs"] == 1 else "多任务",
         common_config["jobs"],
         common_config["speed"],
+        "全部从头重看" if common_config["video_mode"] == "replay_all" else "正常续播",
     )
 
 
@@ -153,6 +177,12 @@ def parse_args():
     )
     parser.add_argument(
         "-j", "--jobs", type=int, default=4, help="同时进行的章节数（1 为单任务，默认 4）"
+    )
+    parser.add_argument(
+        "--video-mode",
+        choices=["normal", "replay_all"],
+        default="normal",
+        help="视频处理方式：normal 正常续播，replay_all 所有视频从头完整观看",
     )
 
     parser.add_argument(
@@ -216,6 +246,7 @@ def load_config_from_file(config_path):
             common_config["speed"] = float(common_config["speed"])
         if "jobs" in common_config:
             common_config["jobs"] = int(common_config["jobs"])
+        common_config["video_mode"] = validate_video_mode(common_config.get("video_mode", "normal"))
         # 处理notopen_action，设置默认值为retry
         if "notopen_action" not in common_config:
             common_config["notopen_action"] = "retry"
@@ -258,6 +289,7 @@ def build_config_from_args(args):
         "course_list": [item.strip() for item in args.list.split(",") if item.strip()] if args.list else None,
         "speed": args.speed or 1.0,
         "jobs": args.jobs,
+        "video_mode": args.video_mode,
         "notopen_action": args.notopen_action or "retry",
         "retry_interval": args.retry_interval or 1.0,
         "add_learning_count": args.add_learning_count,
@@ -320,19 +352,42 @@ def init_chaoxing(common_config, tiku_config, config_path=None):
     return chaoxing
 
 
-def process_job(chaoxing: Chaoxing, course: dict, job: dict, job_info: dict, speed: float) -> StudyResult:
+def process_job(
+        chaoxing: Chaoxing,
+        course: dict,
+        job: dict,
+        job_info: dict,
+        speed: float,
+        replay_all_videos: bool = False,
+) -> StudyResult:
     """处理单个任务点"""
     # 视频任务
     if job["type"] == "video":
         logger.trace(f"识别到视频任务, 任务章节: {course['title']} 任务ID: {job['jobid']}")
+        video_job = job
+        if replay_all_videos:
+            video_job = dict(job)
+            video_job["playTime"] = 0
+            logger.info("全部重看模式：从 0 秒开始观看：{}", video_job.get("name", "未命名视频"))
         # 超星的接口没有返回当前任务是否为Audio音频任务
         video_result = chaoxing.study_video(
-            course, job, job_info, _speed=speed, _type="Video"
+            course,
+            video_job,
+            job_info,
+            _speed=speed,
+            _type="Video",
+            _force_full_playback=replay_all_videos,
         )
         if video_result.is_failure():
             logger.warning("当前任务非视频任务, 正在尝试音频任务解码")
             video_result = chaoxing.study_video(
-                course, job, job_info, _speed=speed, _type="Audio")
+                course,
+                video_job,
+                job_info,
+                _speed=speed,
+                _type="Audio",
+                _force_full_playback=replay_all_videos,
+            )
         if video_result.is_failure():
             logger.warning(
                 f"出现异常任务 -> 任务章节: {course['title']} 任务ID: {job['jobid']}, 已跳过"
@@ -407,6 +462,7 @@ class JobProcessor:
 
         self.chaoxing = chaoxing
         self.speed = config["speed"]
+        self.replay_all_videos = validate_video_mode(config.get("video_mode", "normal")) == "replay_all"
         self.max_tries = 5
         self.tasks = tasks
         self.failed_tasks: list[ChapterTask] = []
@@ -443,7 +499,13 @@ class JobProcessor:
                 logger.info("Queue shut down")
                 return
 
-            task.result = process_chapter(self.chaoxing, task.course, task.point, self.speed)
+            task.result = process_chapter(
+                self.chaoxing,
+                task.course,
+                task.point,
+                self.speed,
+                self.replay_all_videos,
+            )
 
             match task.result:
                 case ChapterResult.SUCCESS:
@@ -500,7 +562,13 @@ class JobProcessor:
             pass
 
 
-def process_chapter(chaoxing: Chaoxing, course: dict[str, Any], point: dict[str, Any], speed: float) -> ChapterResult:
+def process_chapter(
+        chaoxing: Chaoxing,
+        course: dict[str, Any],
+        point: dict[str, Any],
+        speed: float,
+        replay_all_videos: bool = False,
+) -> ChapterResult:
     """处理单个章节"""
     logger.info(f'当前章节: {point["title"]}')
     if point.get("has_finished", False):
@@ -511,7 +579,11 @@ def process_chapter(chaoxing: Chaoxing, course: dict[str, Any], point: dict[str,
 
     # 获取当前章节的所有任务点
     job_info = None
-    jobs, job_info = chaoxing.get_job_list(course, point)
+    jobs, job_info = chaoxing.get_job_list(
+        course,
+        point,
+        include_completed_videos=replay_all_videos,
+    )
 
     # 发现未开放章节, 根据配置处理
     if job_info.get("notOpen", False):
@@ -523,7 +595,14 @@ def process_chapter(chaoxing: Chaoxing, course: dict[str, Any], point: dict[str,
 
     job_results: list[StudyResult] = []
     for job in jobs:
-        result = process_job(chaoxing, course, job, job_info, speed)
+        result = process_job(
+            chaoxing,
+            course,
+            job,
+            job_info,
+            speed,
+            replay_all_videos=replay_all_videos,
+        )
         job_results.append(result)
 
     for result in job_results:
@@ -612,6 +691,7 @@ def main():
         # 强制播放按照配置文件调节
         common_config["speed"] = min(2.0, max(1.0, common_config.get("speed", 1.0)))
         common_config["jobs"] = validate_jobs(common_config.get("jobs", 4))
+        common_config["video_mode"] = validate_video_mode(common_config.get("video_mode", "normal"))
         common_config["notopen_action"] = common_config.get("notopen_action", "retry")
         
         # 初始化增加章节学习次数配置

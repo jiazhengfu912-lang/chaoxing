@@ -70,6 +70,42 @@ class DecodeCourseCardTestCase(unittest.TestCase):
         log_info.assert_any_call("视频已观看：已完成视频")
         log_info.assert_any_call("视频未观看，将开始观看：未完成视频")
 
+    def test_replay_all_includes_completed_videos_but_not_completed_documents(self):
+        payload = {
+            "defaults": {"knowledgeid": "chapter-1"},
+            "attachments": [
+                {"isPassed": True, "job": True, "type": "document", "jobid": "ppt-1"},
+                {
+                    "isPassed": True,
+                    "job": True,
+                    "type": "video",
+                    "jobid": "video-completed",
+                    "mid": "mid-completed",
+                    "playTime": 90_000,
+                    "objectId": "object-completed",
+                    "property": {"name": "已完成视频"},
+                },
+                {
+                    "isPassed": False,
+                    "job": True,
+                    "type": "video",
+                    "jobid": "video-unfinished",
+                    "mid": "mid-unfinished",
+                    "playTime": 30_000,
+                    "objectId": "object-unfinished",
+                    "property": {"name": "未完成视频"},
+                },
+            ],
+        }
+        html = "<script>mArg=" + json.dumps(payload, separators=(",", ":")) + ";</script>"
+
+        jobs, _ = decode_course_card(html, include_completed_videos=True)
+
+        self.assertEqual(
+            [job["jobid"] for job in jobs],
+            ["video-completed", "video-unfinished"],
+        )
+
 
 class GetJobListTestCase(unittest.TestCase):
     class _Response:

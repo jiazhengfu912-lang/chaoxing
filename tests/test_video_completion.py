@@ -23,12 +23,13 @@ class _Response:
 
 
 class _Session:
-    def __init__(self, has_job_limit=False, max_progress_requests=2):
+    def __init__(self, has_job_limit=False, max_progress_requests=2, duration=10):
         self.headers = {}
         self.cookies = {}
         self.progress_params = []
         self.has_job_limit = has_job_limit
         self.max_progress_requests = max_progress_requests
+        self.duration = duration
 
     def get(self, url, params=None, headers=None):
         if "/ananas/status/" in url:
@@ -38,7 +39,7 @@ class _Session:
                     "dtoken": "dtoken",
                     "crc": "crc",
                     "key": "key",
-                    "duration": 10,
+                    "duration": self.duration,
                 }
             )
 
@@ -146,6 +147,35 @@ class VideoCompletionTestCase(unittest.TestCase):
             [params["isdrag"] for params in session.progress_params],
             [3],
         )
+
+    def test_force_full_playback_ignores_early_passed_state_until_video_end(self):
+        session = _AlwaysPassedSession(duration=100)
+        replay_job = dict(self.job, playTime=90_000)
+        clock = Mock()
+        clock.time.side_effect = (float(tick) for tick in range(0, 1000, 10))
+        with patch.object(SessionManager, "get_session", return_value=session), patch.object(
+            self.chaoxing.video_log_limiter, "limit_rate"
+        ), patch.object(self.chaoxing, "get_uid", return_value="user-1"), patch(
+            "api.base.time", clock
+        ), patch(
+            "api.base.random.uniform", return_value=30
+        ), patch(
+            "api.base.tqdm", return_value=_ProgressBar()
+        ):
+            result = self.chaoxing.study_video(
+                self.course,
+                replay_job,
+                {},
+                _speed=1.0,
+                _type="Video",
+                _force_full_playback=True,
+            )
+
+        self.assertEqual(result, StudyResult.SUCCESS)
+        reported_times = [params["playingTime"] for params in session.progress_params]
+        self.assertGreater(len(reported_times), 1)
+        self.assertLess(reported_times[0], 100)
+        self.assertEqual(reported_times[-1], 100)
 
     def test_non_task_video_returns_after_real_playback_reaches_end(self):
         session = _Session()

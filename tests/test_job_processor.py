@@ -19,9 +19,11 @@ class DummyChaoxing:
         self.job_info = job_info
         self.rate_limiter = _NoopRateLimiter()
         self.get_job_list_calls = 0
+        self.include_completed_videos = None
 
-    def get_job_list(self, course, point):
+    def get_job_list(self, course, point, include_completed_videos=False):
         self.get_job_list_calls += 1
+        self.include_completed_videos = include_completed_videos
         return self.job_info["jobs"], self.job_info["job_info"]
 
 
@@ -142,7 +144,40 @@ class JobProcessorTestCase(unittest.TestCase):
 
         self.assertEqual(result, main.ChapterResult.SUCCESS)
         self.assertEqual(chaoxing.get_job_list_calls, 1)
-        process_job.assert_called_once_with(chaoxing, course, video_job, {}, 1.0)
+        process_job.assert_called_once_with(
+            chaoxing,
+            course,
+            video_job,
+            {},
+            1.0,
+            replay_all_videos=False,
+        )
+
+    def test_replay_all_chapter_requests_all_videos_and_forces_playback(self):
+        course = {"title": "课程"}
+        point = {"title": "已完成章节", "has_finished": True}
+        video_job = {"type": "video", "jobid": "video-completed"}
+        chaoxing = DummyChaoxing({"jobs": [video_job], "job_info": {}})
+
+        with patch.object(main, "process_job", return_value=main.StudyResult.SUCCESS) as process_job:
+            result = main.process_chapter(
+                chaoxing,
+                course,
+                point,
+                1.0,
+                replay_all_videos=True,
+            )
+
+        self.assertEqual(result, main.ChapterResult.SUCCESS)
+        self.assertTrue(chaoxing.include_completed_videos)
+        process_job.assert_called_once_with(
+            chaoxing,
+            course,
+            video_job,
+            {},
+            1.0,
+            replay_all_videos=True,
+        )
 
     def test_chapter_processes_multiple_videos_in_order(self):
         course = {"title": "课程"}
